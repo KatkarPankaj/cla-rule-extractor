@@ -1,0 +1,29 @@
+{
+    "document_id": "string",
+    "question": "string",
+    "answer": {
+      "summary": "string",
+      "rules": [
+        {
+          "rule_name": "string",
+          "conditions": ["string"],
+          "compensation": "string",
+          "time_window": "string|null",
+          "exceptions": ["string"]
+        }
+      ]
+    },
+    "evidence": [
+      {
+        "excerpt": "string",
+        "page": 12,
+        "section": "Article 7.3",
+        "chunk_id": "string"
+      }
+    ],
+    "confidence": 0.0,
+    "missing_info": ["string"],
+    "decision": "auto|needs_human",
+    "trace_id": "string"
+  }
+  
