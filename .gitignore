@@ -5,3 +5,4 @@ __pycache__/
 audit_log.jsonl
 .apps/
 .DS_Store
+.env.example
