@@ -6,6 +6,10 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from dotenv import load_dotenv
+import tempfile
+import shutil
+import hashlib
+import math
 from .logging_config import configure_logging, trace_id_var
 
 try:
@@ -27,7 +31,11 @@ logger = logging.getLogger(__name__)
 key = os.getenv("GOOGLE_API_KEY")
 if not key:
     raise RuntimeError("GOOGLE_API_KEY not set")
-logger.info("GOOGLE_API_KEY: %s ... %s", key[:4], key[-4:])
+# Avoid logging secret material. Log presence and length only.
+try:
+    logger.info("GOOGLE_API_KEY set (length=%d)", len(key))
+except Exception:
+    logger.info("GOOGLE_API_KEY present")
 
 workflow = build_workflow()
 
@@ -72,11 +80,34 @@ async def extract_overtime(
 ):
     # prefer middleware-provided trace id; fall back to a new uuid
     trace_id = getattr(request.state, "trace_id", str(uuid.uuid4()))
-    pdf_bytes = await pdf.read()
-    document_id = pdf.filename or "uploaded.pdf"
+    # Enforce optional upload size limit (in bytes). If Content-Length provided, check early.
+    max_bytes = int(os.getenv("UPLOAD_MAX_BYTES", str(
+        10 * 1024 * 1024)))  # default 10 MB
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise HTTPException(
+                    status_code=413, detail="Uploaded file too large")
+        except ValueError:
+            pass
 
-    # Query-level caching: use document hash + normalized question hash as key.
-    doc_hash = cache.doc_hash_from_bytes(pdf_bytes)
+    # Stream upload to a temporary file on disk to avoid holding large PDFs in memory
+    suffix = Path(pdf.filename or "uploaded.pdf").suffix or ".pdf"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    document_id = pdf.filename or tmp.name
+    # copy in chunks from the UploadFile (async) to the temp file on disk
+    with tmp as f:
+        chunk_size = 64 * 1024
+        while True:
+            chunk = await pdf.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+    pdf_path = tmp.name
+
+    # Query-level caching: use document hash (from file path) + normalized question hash as key.
+    doc_hash = cache.doc_hash_from_path(pdf_path)
     q_hash = cache.question_hash(question)
     cached = cache.get_query_cache(doc_hash, q_hash)
     if cached:
@@ -85,8 +116,9 @@ async def extract_overtime(
         logger.info("cache hit for doc=%s q=%s", document_id, q_hash)
         return cached
 
+    # include path to the saved PDF; workflow nodes will stream/process from disk
     state = {
-        "pdf_bytes": pdf_bytes,
+        "pdf_path": pdf_path,
         "document_id": document_id,
         "question": question,
         "trace_id": trace_id,

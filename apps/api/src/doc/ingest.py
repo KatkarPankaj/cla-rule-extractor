@@ -9,3 +9,12 @@ def extract_pages(pdf_bytes: bytes) -> List[str]:
     for p in reader.pages:
         pages.append(p.extract_text() or "")
     return pages
+
+
+def extract_pages_from_path(path: str) -> List[str]:
+    """Extract pages from a PDF file on disk without loading whole file into memory."""
+    reader = PdfReader(path)
+    pages = [""]
+    for p in reader.pages:
+        pages.append(p.extract_text() or "")
+    return pages

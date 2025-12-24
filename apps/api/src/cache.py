@@ -95,5 +95,17 @@ def doc_hash_from_bytes(b: bytes) -> str:
     return _hash_text(b)
 
 
+def doc_hash_from_path(path: str) -> str:
+    # Stream file for hashing to avoid loading into memory
+    h = hashlib.sha256()
+    p = Path(path)
+    if not p.exists():
+        return ""
+    with p.open('rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def question_hash(q: str) -> str:
     return hashlib.sha1(q.strip().lower().encode('utf-8')).hexdigest()

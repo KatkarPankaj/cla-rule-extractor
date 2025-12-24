@@ -1,9 +1,13 @@
 from typing import TypedDict, Dict, Any, List, Optional
 
+
 class WorkflowState(TypedDict, total=False):
     document_id: str
     question: str
     trace_id: str
+
+    # Path to a temporarily-saved PDF on disk (preferred for large uploads)
+    pdf_path: str
 
     pdf_bytes: bytes            # ✅ add this
 
