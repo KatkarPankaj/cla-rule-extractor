@@ -1,7 +1,10 @@
 import uuid
 import logging
+import os
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from dotenv import load_dotenv
 from .logging_config import configure_logging, trace_id_var
 
@@ -20,7 +23,17 @@ load_dotenv()
 configure_logging()
 app = FastAPI(title="CLA Evidence Extractor POC")
 logger = logging.getLogger(__name__)
+# Fail-fast check for GOOGLE_API_KEY (print only first/last chars for safe debug)
+key = os.getenv("GOOGLE_API_KEY")
+if not key:
+    raise RuntimeError("GOOGLE_API_KEY not set")
+logger.info("GOOGLE_API_KEY: %s ... %s", key[:4], key[-4:])
+
 workflow = build_workflow()
+
+# Mount static files directory (serves /static/demo.html)
+static_dir = str(Path(__file__).resolve().parents[1] / "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 @app.middleware("http")
@@ -47,66 +60,8 @@ def root():
 
 @app.get("/demo")
 def demo_page():
-    html = """
-        <!doctype html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <title>CLA Evidence Extractor — Demo</title>
-            <style>
-                body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial; padding: 24px; }
-                .box { max-width: 800px; margin: 0 auto; }
-                pre { background: #f5f5f5; padding: 12px; overflow:auto }
-            </style>
-        </head>
-        <body>
-            <div class="box">
-                <h1>CLA Evidence Extractor — Demo</h1>
-                <p>Upload a PDF and ask a question. The demo posts to <code>/extract/overtime</code> and displays the JSON response.</p>
-
-                <form id="upload-form">
-                    <label>PDF: <input type="file" id="pdf" accept="application/pdf" required></label>
-                    <br/><br/>
-                    <label>Question: <input type="text" id="question" size="80" value="What are the overtime compensation rules?"></label>
-                    <br/><br/>
-                    <button type="submit">Extract</button>
-                </form>
-
-                <h3>Response</h3>
-                <pre id="out">No response yet</pre>
-            </div>
-
-            <script>
-                const form = document.getElementById('upload-form');
-                const out = document.getElementById('out');
-                form.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const pdf = document.getElementById('pdf').files[0];
-                    const question = document.getElementById('question').value;
-                    if (!pdf) { alert('Choose a PDF'); return; }
-                    const fd = new FormData();
-                    fd.append('pdf', pdf, pdf.name);
-                    fd.append('question', question);
-
-                    out.textContent = 'Uploading...';
-                    try {
-                        const resp = await fetch('/extract/overtime', { method: 'POST', body: fd });
-                        const text = await resp.text();
-                        try {
-                            const j = JSON.parse(text);
-                            out.textContent = JSON.stringify(j, null, 2);
-                        } catch (err) {
-                            out.textContent = 'Non-JSON response (status ' + resp.status + '):\n' + text;
-                        }
-                    } catch (err) {
-                        out.textContent = 'Request failed: ' + err;
-                    }
-                });
-            </script>
-        </body>
-        </html>
-        """
-    return HTMLResponse(content=html, status_code=200)
+    # Redirect to the static demo HTML for a safer, static-served UI
+    return RedirectResponse(url="/static/demo.html")
 
 
 @app.post("/extract/overtime", response_model=RunResponse)

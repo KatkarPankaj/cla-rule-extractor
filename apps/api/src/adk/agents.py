@@ -35,10 +35,31 @@ Rules:
 Be conservative with confidence.
 """
 
+
 def build_overtime_agent() -> Agent:
     return Agent(
         name="cla_overtime_agent",
         model="gemini-2.0-flash",
         instruction=ANALYZER_INSTRUCTION,
         tools=[write_audit],
+    )
+
+
+SUMMARIZER_INSTRUCTION = """
+You are a strict summarizer. Given a chunk of a document, produce a short, factual summary.
+
+Requirements:
+- ONLY summarize the provided text; do not add new facts or infer beyond the text.
+- Produce one paragraph, <= 300 characters.
+- Keep key phrases and numbers when present.
+- Output only the summary text (no JSON wrapper).
+"""
+
+
+def build_summarizer_agent() -> Agent:
+    return Agent(
+        name="cla_chunk_summarizer",
+        model="gemini-2.0-flash",
+        instruction=SUMMARIZER_INSTRUCTION,
+        tools=[],
     )
