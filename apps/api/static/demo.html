@@ -12,6 +12,9 @@
             --muted: #9aa4b2;
             --accent: #6ee7b7;
             --glass: rgba(255, 255, 255, 0.04);
+            --error: #f87171;
+            --success: #34d399;
+            --warning: #fbbf24;
         }
 
         html,
@@ -107,7 +110,18 @@
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            text-align: center
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .drop-area:hover {
+            border-color: var(--accent);
+            background: rgba(110, 231, 183, 0.05);
+        }
+
+        .drop-area.dragover {
+            border-color: var(--accent);
+            background: rgba(110, 231, 183, 0.1);
         }
 
         .small {
@@ -128,7 +142,12 @@
             padding: 10px 14px;
             border-radius: 10px;
             font-weight: 600;
-            cursor: pointer
+            cursor: pointer;
+            transition: opacity 0.3s;
+        }
+
+        button.primary:hover:not([disabled]) {
+            opacity: 0.9;
         }
 
         button.primary[disabled] {
@@ -151,6 +170,18 @@
             max-height: 60vh;
         }
 
+        .out.error {
+            color: var(--error);
+            background: rgba(248, 113, 113, 0.05);
+            border: 1px solid rgba(248, 113, 113, 0.2);
+        }
+
+        .out.success {
+            color: var(--success);
+            background: rgba(52, 211, 153, 0.05);
+            border: 1px solid rgba(52, 211, 153, 0.2);
+        }
+
         .meta {
             display: flex;
             gap: 8px;
@@ -171,6 +202,28 @@
             border-top-color: var(--accent);
             animation: spin 900ms linear infinite;
             display: inline-block
+        }
+
+        .status {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status.ready {
+            background: rgba(52, 211, 153, 0.1);
+            color: var(--success);
+        }
+
+        .status.processing {
+            background: rgba(251, 191, 36, 0.1);
+            color: var(--warning);
+        }
+
+        .status.error {
+            background: rgba(248, 113, 113, 0.1);
+            color: var(--error);
         }
 
         @keyframes spin {
@@ -225,7 +278,7 @@
 
                 <div class="right">
                     <div class="meta">
-                        <div class="muted">Ready</div>
+                        <div id="status" class="status ready">Ready</div>
                         <div style="display:flex;gap:8px">
                             <button id="submit" class="primary">Extract</button>
                         </div>
@@ -233,7 +286,7 @@
 
                     <pre id="result" class="out">No response yet</pre>
                     <div style="display:flex;gap:8px;margin-top:8px">
-                        <button id="download" class="primary" style="background:#334155">Download JSON</button>
+                        <button id="download" class="primary" style="background:#334155" disabled>Download JSON</button>
                     </div>
                 </div>
             </form>
@@ -241,68 +294,244 @@
     </div>
 
     <script>
-        // Basic client-side behavior: drag/drop, submit form, show progress and pretty JSON
+        // DOM Elements
         const drop = document.getElementById('drop');
         const fileInput = document.getElementById('pdf');
         const submit = document.getElementById('submit');
         const result = document.getElementById('result');
         const questionEl = document.getElementById('question');
         const downloadBtn = document.getElementById('download');
+        const statusEl = document.getElementById('status');
 
         let lastJson = null;
 
+        // Update status display
+        function updateStatus(text, type = 'ready') {
+            statusEl.textContent = text;
+            statusEl.className = `status ${type}`;
+        }
+
+        // File validation
+        function validateFile(file) {
+            if (!file) {
+                updateStatus('No file selected', 'error');
+                return { valid: false, message: 'Please choose a PDF file first' };
+            }
+
+            // Check file type
+            if (file.type !== 'application/pdf') {
+                updateStatus('Invalid file type', 'error');
+                return {
+                    valid: false,
+                    message: `Invalid file type: ${file.type || 'unknown'}. Please upload a PDF file.`
+                };
+            }
+
+            // Check file extension
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                updateStatus('Invalid file extension', 'error');
+                return {
+                    valid: false,
+                    message: 'File must have .pdf extension'
+                };
+            }
+
+            // Check file size (max 10MB)
+            const maxSize = 10 * 1024 * 1024; // 10MB
+            if (file.size > maxSize) {
+                updateStatus('File too large', 'error');
+                return {
+                    valid: false,
+                    message: `File too large (${(file.size / 1024 / 1024).toFixed(2)}MB). Max size: 10MB`
+                };
+            }
+
+            if (file.size === 0) {
+                updateStatus('Empty file', 'error');
+                return { valid: false, message: 'File is empty' };
+            }
+
+            return { valid: true, message: 'File is valid' };
+        }
+
+        // Drag and drop handlers
         drop.addEventListener('click', () => fileInput.click());
-        drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.opacity = 0.9; });
-        drop.addEventListener('dragleave', () => { drop.style.opacity = 1; });
+
+        drop.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            drop.classList.add('dragover');
+        });
+
+        drop.addEventListener('dragleave', () => {
+            drop.classList.remove('dragover');
+        });
+
         drop.addEventListener('drop', (e) => {
-            e.preventDefault(); drop.style.opacity = 1;
+            e.preventDefault();
+            drop.classList.remove('dragover');
+
             if (e.dataTransfer.files && e.dataTransfer.files.length) {
-                fileInput.files = e.dataTransfer.files;
-                drop.textContent = e.dataTransfer.files[0].name;
+                const file = e.dataTransfer.files[0];
+                const validation = validateFile(file);
+
+                if (validation.valid) {
+                    fileInput.files = e.dataTransfer.files;
+                    drop.textContent = file.name;
+                    updateStatus('Ready to extract', 'ready');
+                } else {
+                    alert(validation.message);
+                }
             }
         });
 
+        // File input change handler
         fileInput.addEventListener('change', () => {
-            if (fileInput.files.length) drop.textContent = fileInput.files[0].name;
+            if (fileInput.files.length) {
+                const file = fileInput.files[0];
+                const validation = validateFile(file);
+
+                if (validation.valid) {
+                    drop.textContent = file.name;
+                    updateStatus('Ready to extract', 'ready');
+                } else {
+                    fileInput.value = '';
+                    drop.textContent = 'Drop a PDF here or click to choose';
+                    alert(validation.message);
+                }
+            }
         });
 
+        // Main extraction function
         async function doExtract() {
-            const f = fileInput.files[0];
-            const q = questionEl.value || '';
-            if (!f) { alert('Please choose a PDF file first'); return; }
+            const file = fileInput.files[0];
+            const question = questionEl.value || 'What are the overtime compensation rules?';
 
-            submit.disabled = true; result.innerHTML = '<span class="spinner"></span> Running...';
-            lastJson = null; downloadBtn.disabled = true;
+            // Validate file
+            const validation = validateFile(file);
+            if (!validation.valid) {
+                alert(validation.message);
+                return;
+            }
 
-            const fd = new FormData(); fd.append('pdf', f, f.name); fd.append('question', q);
+            // Update UI
+            submit.disabled = true;
+            downloadBtn.disabled = true;
+            updateStatus('Processing...', 'processing');
+            result.textContent = '';
+            result.className = 'out';
+            lastJson = null;
+
+            // Create form data
+            const formData = new FormData();
+            formData.append('pdf', file, file.name);
+            formData.append('question', question);
+
             try {
-                const resp = await fetch('/extract/overtime', { method: 'POST', body: fd });
-                const text = await resp.text();
+                // Make API request
+                const response = await fetch('/extract/overtime', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const responseText = await response.text();
+
+                if (!response.ok) {
+                    // Handle error response
+                    let errorMessage = `Error ${response.status}: `;
+
+                    try {
+                        const errorJson = JSON.parse(responseText);
+                        errorMessage += errorJson.detail || responseText;
+                    } catch {
+                        errorMessage += responseText;
+                    }
+
+                    result.textContent = errorMessage;
+                    result.className = 'out error';
+                    updateStatus('Error', 'error');
+                    return;
+                }
+
+                // Parse successful response
                 try {
-                    const j = JSON.parse(text);
-                    lastJson = j;
-                    result.textContent = JSON.stringify(j, null, 2);
+                    const jsonResponse = JSON.parse(responseText);
+                    lastJson = jsonResponse;
+
+                    // Format JSON for display
+                    result.textContent = JSON.stringify(jsonResponse, null, 2);
+                    result.className = 'out success';
+
+                    // Enable download button
                     downloadBtn.disabled = false;
-                } catch (err) {
-                    // Try to extract JSON inside fenced blocks as a fallback (server also tries this)
-                    const re = /```(?:json)?\s*([\s\S]*?)```/i;
-                    const m = re.exec(text);
-                    if (m && m[1]) {
-                        try { const j2 = JSON.parse(m[1]); lastJson = j2; result.textContent = JSON.stringify(j2, null, 2); downloadBtn.disabled = false; }
-                        catch (e) { result.textContent = 'Non-JSON response:' + '\n' + text.substring(0, 200); }
+
+                    // Update status
+                    const decision = jsonResponse.decision || 'unknown';
+                    const confidence = jsonResponse.confidence || 0;
+                    updateStatus(`✓ Done (${decision}, ${(confidence * 100).toFixed(1)}% confidence)`, 'ready');
+
+                } catch (parseError) {
+                    // Try to extract JSON from markdown code blocks
+                    const jsonRegex = /```(?:json)?\s*([\s\S]*?)```/i;
+                    const match = jsonRegex.exec(responseText);
+
+                    if (match && match[1]) {
+                        try {
+                            const extractedJson = JSON.parse(match[1]);
+                            lastJson = extractedJson;
+                            result.textContent = JSON.stringify(extractedJson, null, 2);
+                            result.className = 'out success';
+                            downloadBtn.disabled = false;
+                            updateStatus('✓ Done', 'ready');
+                        } catch (e) {
+                            result.textContent = 'Could not parse JSON from response:\n' + responseText.substring(0, 500);
+                            result.className = 'out error';
+                            updateStatus('Parse error', 'error');
+                        }
                     } else {
-                        result.textContent = 'Non-JSON response (status ' + resp.status + '):\n' + text.substring(0, 200);
+                        result.textContent = 'Non-JSON response:\n' + responseText.substring(0, 500);
+                        result.className = 'out error';
+                        updateStatus('Invalid response', 'error');
                     }
                 }
-            } catch (e) { result.textContent = 'Request failed: ' + String(e); }
-            finally { submit.disabled = false; }
+
+            } catch (networkError) {
+                // Handle network errors
+                result.textContent = 'Network error: ' + networkError.message;
+                result.className = 'out error';
+                updateStatus('Network error', 'error');
+
+            } finally {
+                // Reset UI
+                submit.disabled = false;
+            }
         }
 
+        // Download JSON handler
+        downloadBtn.addEventListener('click', () => {
+            if (!lastJson) return;
+
+            const blob = new Blob([JSON.stringify(lastJson, null, 2)], {
+                type: 'application/json'
+            });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+
+            link.href = url;
+            link.download = `extract_${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        });
+
+        // Submit button handler
         submit.addEventListener('click', doExtract);
 
-        downloadBtn.addEventListener('click', () => {
-            if (!lastJson) return; const b = new Blob([JSON.stringify(lastJson, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(b); const a = document.createElement('a'); a.href = url; a.download = 'extract.json'; a.click(); URL.revokeObjectURL(url);
+        // Enter key handler for question input
+        questionEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                doExtract();
+            }
         });
     </script>
 </body>
