@@ -8,6 +8,7 @@ class WorkflowState(TypedDict, total=False):
 
     # Path to a temporarily-saved PDF on disk (preferred for large uploads)
     pdf_path: str
+    pdf_password: str           # Password for encrypted PDFs (optional)
 
     pdf_bytes: bytes            # ✅ add this
 

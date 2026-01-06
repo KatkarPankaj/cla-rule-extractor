@@ -277,6 +277,17 @@
                 </div>
 
                 <div class="right">
+                    <div id="password-container" style="display:none;margin-bottom:12px">
+                        <label for="password">Password (for encrypted PDFs)</label>
+                        <div style="display:flex;gap:8px;align-items:flex-end">
+                            <input id="password" type="password" placeholder="Enter PDF password..." style="flex:1" />
+                            <button id="password-submit" class="primary" style="padding:10px 14px">Submit</button>
+                        </div>
+                        <div class="small muted" style="margin-top:8px">🔒 This PDF is password-protected. Enter the
+                            password and click Submit.
+                        </div>
+                    </div>
+
                     <div class="meta">
                         <div id="status" class="status ready">Ready</div>
                         <div style="display:flex;gap:8px">
@@ -298,8 +309,11 @@
         const drop = document.getElementById('drop');
         const fileInput = document.getElementById('pdf');
         const submit = document.getElementById('submit');
+        const passwordSubmit = document.getElementById('password-submit');
         const result = document.getElementById('result');
         const questionEl = document.getElementById('question');
+        const passwordEl = document.getElementById('password');
+        const passwordContainerEl = document.getElementById('password-container');
         const downloadBtn = document.getElementById('download');
         const statusEl = document.getElementById('status');
 
@@ -405,6 +419,7 @@
         async function doExtract() {
             const file = fileInput.files[0];
             const question = questionEl.value || 'What are the overtime compensation rules?';
+            const password = passwordEl.value;
 
             // Validate file
             const validation = validateFile(file);
@@ -425,6 +440,12 @@
             const formData = new FormData();
             formData.append('pdf', file, file.name);
             formData.append('question', question);
+            if (password) {
+                formData.append('password', password);
+                console.log(`[DEBUG] Sending password with length: ${password.length}`);
+            } else {
+                console.log('[DEBUG] No password provided');
+            }
 
             try {
                 // Make API request
@@ -438,10 +459,18 @@
                 if (!response.ok) {
                     // Handle error response
                     let errorMessage = `Error ${response.status}: `;
+                    let requiresPassword = false;
 
                     try {
                         const errorJson = JSON.parse(responseText);
                         errorMessage += errorJson.detail || responseText;
+
+                        // Check if error is about password protection
+                        if (errorJson.detail && (errorJson.detail.includes('password') || errorJson.detail.includes('🔒'))) {
+                            requiresPassword = true;
+                            passwordContainerEl.style.display = 'block';
+                            passwordEl.focus();
+                        }
                     } catch {
                         errorMessage += responseText;
                     }
@@ -449,6 +478,11 @@
                     result.textContent = errorMessage;
                     result.className = 'out error';
                     updateStatus('Error', 'error');
+
+                    // If password was wrong, clear it and show error
+                    if (password && !requiresPassword) {
+                        passwordEl.value = '';
+                    }
                     return;
                 }
 
@@ -463,6 +497,10 @@
 
                     // Enable download button
                     downloadBtn.disabled = false;
+
+                    // Hide password container on success
+                    passwordContainerEl.style.display = 'none';
+                    passwordEl.value = '';
 
                     // Update status
                     const decision = jsonResponse.decision || 'unknown';
@@ -527,8 +565,18 @@
         // Submit button handler
         submit.addEventListener('click', doExtract);
 
+        // Password submit button handler
+        passwordSubmit.addEventListener('click', doExtract);
+
         // Enter key handler for question input
         questionEl.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                doExtract();
+            }
+        });
+
+        // Enter key handler for password input
+        passwordEl.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 doExtract();
             }

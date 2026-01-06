@@ -9,12 +9,13 @@ class PDFValidator:
     """Handles PDF validation and password detection"""
 
     @staticmethod
-    def validate_pdf(file_path):
+    def validate_pdf(file_path, password=None):
         """
         Validates if a file is a valid PDF and checks for password protection
 
         Args:
             file_path (str): Path to the PDF file
+            password (str): Optional password for encrypted PDFs
 
         Returns:
             dict: Validation result with status and details
@@ -88,10 +89,30 @@ class PDFValidator:
                     error_msg = str(e).lower()
                     if "password" in error_msg or "encrypted" in error_msg:
                         validation_result['is_password_protected'] = True
-                        validation_result['error_message'] = (
-                            "🔒 This PDF is password protected. "
-                            "Please enter the password to continue."
-                        )
+
+                        # Try to decrypt with provided password
+                        if password:
+                            try:
+                                success = reader.decrypt(password)
+                                if success or len(reader.pages) > 0:
+                                    # Password was correct or PDF is readable
+                                    validation_result['is_password_protected'] = False
+                                    validation_result['page_count'] = len(
+                                        reader.pages)
+                                    validation_result['is_valid'] = True
+                                else:
+                                    validation_result['error_message'] = (
+                                        "❌ Incorrect password or corrupted PDF. Please try again."
+                                    )
+                            except Exception as decrypt_err:
+                                validation_result['error_message'] = (
+                                    "❌ Incorrect password or corrupted PDF. Please try again."
+                                )
+                        else:
+                            validation_result['error_message'] = (
+                                "🔒 This PDF is password protected. "
+                                "Please enter the password to continue."
+                            )
                     else:
                         validation_result['error_message'] = (
                             f"❌ PDF appears to be corrupted: {str(e)}"
