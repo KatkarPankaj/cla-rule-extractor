@@ -160,12 +160,13 @@ async def test_endpoint():
     }
 
 
-def validate_pdf_file(file_path: str) -> dict:
+def validate_pdf_file(file_path: str, password: str = None) -> dict:
     """
     Validate if a file is a valid PDF
 
     Args:
         file_path: Path to the file to validate
+        password: Optional password for encrypted PDFs
 
     Returns:
         dict: Validation result
@@ -216,7 +217,54 @@ def validate_pdf_file(file_path: str) -> dict:
                 # Check if PDF is encrypted/password protected
                 if reader.is_encrypted:
                     validation_result['is_password_protected'] = True
-                    validation_result['error_message'] = "PDF is password protected"
+                    logger.info(
+                        f"PDF is encrypted, attempting decryption with password")
+
+                    # Try to decrypt with provided password
+                    if password:
+                        try:
+                            # Try to decrypt
+                            logger.info(
+                                f"Decrypting PDF with password length: {len(password)}, repr: {repr(password)}")
+                            decrypt_result = reader.decrypt(password)
+                            logger.info(f"Decrypt result: {decrypt_result}")
+
+                            # decrypt() returns 0 if password is wrong, 1 if user password matched, 2 if owner password matched
+                            if decrypt_result == 0:
+                                validation_result['error_message'] = "Incorrect password"
+                                logger.error(
+                                    "Decrypt result was 0 - password is incorrect")
+                            else:
+                                # Try to access pages to verify password worked
+                                try:
+                                    pages = reader.pages
+                                    page_count = len(pages)
+                                    logger.info(
+                                        f"Successfully accessed pages. Page count: {page_count}")
+                                    if page_count > 0:
+                                        # Password was correct - can read pages
+                                        validation_result['is_password_protected'] = False
+                                        validation_result['page_count'] = page_count
+                                        validation_result['is_valid'] = True
+                                        validation_result['file_type'] = 'application/pdf'
+                                        logger.info(
+                                            "PDF decryption successful!")
+                                    else:
+                                        validation_result['error_message'] = "PDF has no pages"
+                                        logger.warning("PDF has no pages")
+                                except Exception as page_err:
+                                    # Failed to read pages - wrong password
+                                    logger.error(
+                                        f"Failed to read pages: {type(page_err).__name__}: {page_err}")
+                                    validation_result['error_message'] = "Incorrect password or corrupted PDF"
+                        except Exception as decrypt_err:
+                            logger.error(
+                                f"Decrypt error: {type(decrypt_err).__name__}: {decrypt_err}")
+                            validation_result['error_message'] = "Incorrect password or corrupted PDF"
+                    else:
+                        validation_result['error_message'] = "PDF is password protected"
+                        logger.info(
+                            "PDF is password protected, no password provided")
                     return validation_result
 
                 # Get page count
@@ -455,7 +503,9 @@ def is_obviously_irrelevant(filename: str, document_type: str, key_topics: List[
 async def extract_overtime(
     request: Request,
     pdf: UploadFile = File(...),
-    question: str = Form("What are the overtime compensation rules?")
+    question: str = Form("What are the overtime compensation rules?"),
+    password: str = Form(
+        None, description="Password for encrypted PDFs (optional)")
 ):
     """
     Extract rules and evidence from a PDF document
@@ -509,7 +559,11 @@ async def extract_overtime(
         pdf_path = tmp.name
 
         # Validate PDF file
-        validation_result = validate_pdf_file(pdf_path)
+        logger.info(
+            f"Validating PDF with password: {'*' * len(password) if password else 'None'}")
+        validation_result = validate_pdf_file(pdf_path, password=password)
+        logger.info(
+            f"Validation result: is_valid={validation_result['is_valid']}, is_password_protected={validation_result['is_password_protected']}, error={validation_result['error_message']}")
 
         if not validation_result['is_valid']:
             # Clean up temp file
@@ -519,10 +573,18 @@ async def extract_overtime(
             error_msg = validation_result['error_message']
 
             if validation_result['is_password_protected']:
-                raise HTTPException(
-                    status_code=400,
-                    detail="PDF is password protected. Please remove password protection and try again."
-                )
+                if not password:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="🔒 This PDF is password protected. Please provide the password to continue."
+                    )
+                else:
+                    # Password was provided but validation still says it's password protected
+                    # This means the password was wrong
+                    raise HTTPException(
+                        status_code=400,
+                        detail="❌ Incorrect password or corrupted PDF. Please try again."
+                    )
             else:
                 raise HTTPException(
                     status_code=400,
@@ -610,7 +672,8 @@ async def extract_overtime(
             "trace_id": trace_id,
             "page_count": validation_result['page_count'],
             "file_size": validation_result['file_size'],
-            "relevance_check": relevance_result
+            "relevance_check": relevance_result,
+            "pdf_password": password
         }
 
         # Execute workflow

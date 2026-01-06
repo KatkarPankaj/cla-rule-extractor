@@ -20,7 +20,12 @@ logger = logging.getLogger(__name__)
 def ingest_node(state: WorkflowState) -> WorkflowState:
     pdf_path = state.get("pdf_path")
     if pdf_path:
-        pages = extract_pages_from_path(pdf_path)
+        password = state.get("pdf_password")
+        try:
+            pages = extract_pages_from_path(pdf_path, password=password)
+        except Exception as e:
+            logger.error(f"Failed to extract pages: {e}")
+            raise
         try:
             os.remove(pdf_path)
         except Exception:
@@ -29,7 +34,8 @@ def ingest_node(state: WorkflowState) -> WorkflowState:
 
     pdf_bytes = state.get("pdf_bytes")
     if pdf_bytes:
-        pages = extract_pages(pdf_bytes)
+        password = state.get("pdf_password")
+        pages = extract_pages(pdf_bytes, password=password)
         return {"pages": pages}
 
     raise RuntimeError("no pdf provided to ingest_node")
@@ -42,7 +48,8 @@ async def index_node(state: WorkflowState) -> WorkflowState:
         try:
             summ = cache.get_chunk_summary(document_id, c["chunk_id"]) or None
             if not summ:
-                summ = cache.compute_summary_if_missing(document_id, c["chunk_id"], c.get("text", ""))
+                summ = cache.compute_summary_if_missing(
+                    document_id, c["chunk_id"], c.get("text", ""))
             c["summary"] = summ
         except Exception:
             c["summary"] = None
@@ -51,7 +58,8 @@ async def index_node(state: WorkflowState) -> WorkflowState:
 
 def retrieve_node(state: WorkflowState) -> WorkflowState:
     retrieved = keyword_retrieve(state["chunks"], state["question"], k=8)
-    write_audit({"trace_id": state.get("trace_id"), "step": "retrieve", "k": len(retrieved)})
+    write_audit({"trace_id": state.get("trace_id"),
+                "step": "retrieve", "k": len(retrieved)})
     return {"retrieved": retrieved}
 
 
@@ -67,7 +75,8 @@ def evidence_node(state: WorkflowState) -> WorkflowState:
     evidence = []
     for cid, c in by_id.items():
         excerpt = (c.get("text") or "")[:800]
-        evidence.append({"evidence_id": f"e_{cid}", "chunk_id": cid, "page": int(c.get("page", 0)), "excerpt": excerpt})
+        evidence.append({"evidence_id": f"e_{cid}", "chunk_id": cid, "page": int(
+            c.get("page", 0)), "excerpt": excerpt})
     return {"evidence": evidence}
 
 
